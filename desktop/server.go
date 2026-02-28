@@ -77,7 +77,7 @@ func main() {
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
-				log.Printf("IP %s:%d", ipnet.IP.String(), port)
+				log.Printf("http://%s:%d", ipnet.IP.String(), port)
 			}
 		}
 	}

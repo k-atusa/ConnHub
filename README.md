@@ -12,9 +12,14 @@ Connection Hub
 
 ## Build Executable
 
-go version
+desktop version
 ```bash
 go mod init example.com
 go mod tidy
 go build -ldflags="-s -w" -trimpath server.go
+```
+
+android version
+```bash
+gradlew.bat [assembleRelease|assembleDebug]
 ```

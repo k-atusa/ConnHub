@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connection Hub 1.0</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+    }
+
+    .container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .section {
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      flex: 1 1 300px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    /* Text Share Section */
+    .text-share textarea {
+      width: 100%;
+      height: 200px;
+      padding: 10px;
+      font-size: 16px;
+      resize: vertical;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+
+    .status-log {
+      font-size: 0.85em;
+      color: #666;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    /* File Share Section */
+    .file-list {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 10px;
+      background: #fafafa;
+    }
+
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+
+    .file-item span {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-item button {
+      margin-left: 8px;
+      background: #dc3545;
+    }
+
+    .file-item button.download-btn {
+      background: #28a745;
+    }
+
+    .file-share .buttons {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    /* Buttons */
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      background: #007BFF;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.8;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="section text-share">
+      <h2>Text Share</h2>
+      <textarea id="sharedText" placeholder="Enter your text here..."></textarea>
+      <div class="status-log" id="textLog">Waiting for sync...</div>
+    </div>
+
+    <div class="section file-share">
+      <h2>File Share</h2>
+      <div class="file-list" id="fileList"></div>
+      <div class="buttons">
+        <button onclick="uploadFile()">Upload</button>
+        <span class="status-log" id="fileLog" style="font-weight: bold; margin-top: 0;">Ready</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // tracker timestamp
+    let lastTextTs = 0;
+    let lastFilesTs = 0;
+
+    let typingTimer;
+    const textArea = document.getElementById('sharedText');
+    const textLog = document.getElementById('textLog');
+    const fileLog = document.getElementById('fileLog');
+    const fileList = document.getElementById('fileList');
+
+    // 1. Text autosave, wait 0.5s before sending to server
+    textArea.addEventListener('input', () => {
+      clearTimeout(typingTimer);
+      textLog.textContent = 'Typing...';
+
+      typingTimer = setTimeout(async () => {
+        textLog.textContent = 'Saving...';
+        try {
+          const response = await fetch('/api/text', {
+            method: 'POST',
+            body: textArea.value
+          });
+          if (response.ok) {
+            const data = await response.json();
+            lastTextTs = data.ts; // update timestamp from server
+            textLog.textContent = 'Saved: ' + new Date().toLocaleTimeString();
+          }
+        } catch (e) {
+          textLog.textContent = 'Save failed!';
+        }
+      }, 500);
+    });
+
+    // 2. Status sync every 3 seconds
+    async function syncState() {
+      try {
+        // send client timestamp
+        const response = await fetch(`/api/state?text_ts=${lastTextTs}&files_ts=${lastFilesTs}`);
+        if (!response.ok) return;
+        const state = await response.json();
+
+        // update DOM only if there is new text
+        if (state.text && state.text.updated) {
+          textArea.value = state.text.data;
+          lastTextTs = state.text.ts;
+          textLog.textContent = 'Synced: ' + new Date().toLocaleTimeString();
+        }
+
+        // update DOM only if there is new files
+        if (state.files && state.files.updated) {
+          renderFiles(state.files.data);
+          lastFilesTs = state.files.ts;
+          fileLog.textContent = 'Synced: ' + new Date().toLocaleTimeString();
+        }
+      } catch (e) {
+        console.error("Sync error", e);
+      }
+    }
+
+    // 3. Render file list
+    function renderFiles(files) {
+      fileList.innerHTML = '';
+      if (files.length === 0) {
+        fileList.innerHTML = '<div style="color: #999; text-align: center;">No files uploaded</div>';
+        return;
+      }
+      files.forEach(filename => {
+        fileList.innerHTML += `
+          <div class="file-item">
+            <span>${filename}</span>
+            <div>
+              <button class="download-btn" onclick="downloadFile('${filename}')">Download</button>
+              <button onclick="deleteFile('${filename}')">Delete</button>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    // 4. File upload
+    async function uploadFile() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+
+      input.onchange = async () => {
+        const files = Array.from(input.files);
+        if (files.length === 0) return;
+
+        for (const file of files) {
+          fileLog.textContent = 'Uploading: ' + file.name + '...';
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append("filename", file.name);
+
+          await fetch('/api/files/upload', {
+            method: 'POST',
+            body: formData
+          });
+        }
+        fileLog.textContent = 'Upload complete';
+        syncState(); // trigger sync
+      };
+      input.click();
+    }
+
+    // 5. File download
+    function downloadFile(filename) {
+      window.location.href = `/api/files/download/${encodeURIComponent(filename)}`;
+    }
+
+    // 6. File delete
+    async function deleteFile(filename) {
+      fileLog.textContent = 'Deleting...';
+      await fetch(`/api/files/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      syncState(); // trigger sync
+    }
+
+    // 7. Initial sync
+    syncState();
+    setInterval(syncState, 3000);
+  </script>
+</body>
+
+</html>
