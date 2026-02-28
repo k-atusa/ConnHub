@@ -93,7 +93,7 @@ public class MainActivity extends AppCompatActivity implements ItemAdapter.OnIte
         super.onDestroy();
         if (svcBound) {
             try {
-                svcMessenger.send(Message.obtain(null, 2)); // stop the server
+                svcMessenger.send(Message.obtain(null, 0)); // stop the server
             } catch (Exception e) {
                 logView.append(e.toString());
             }

@@ -21,5 +21,7 @@ go build -ldflags="-s -w" -trimpath server.go
 
 android version
 ```bash
+gradlew.bat clean
 gradlew.bat [assembleRelease|assembleDebug]
+cd android/app/build/outputs/apk/debug
 ```

@@ -42,7 +42,9 @@ public class ConnHubService extends Service {
     private class IncomingHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
-            if (msg.what == 1) {
+            if (msg.what == 0) {
+                stopServer();
+            } else if (msg.what == 1) {
                 recvMessenger = msg.replyTo;
             } else {
                 startServer(msg.what);
@@ -74,10 +76,7 @@ public class ConnHubService extends Service {
 
     @Override
     public void onDestroy() {
-        if (svrThread != null) {
-            server.stopServer();
-            svrThread.interrupt();
-        } // stop the server
+        stopServer(); // stop the server
         super.onDestroy();
     }
 
@@ -100,6 +99,17 @@ public class ConnHubService extends Service {
             public void run() { server.startServer(); }
         });
         svrThread.start(); // independent with UI thread
+    }
+
+    private void stopServer() {
+        if (server != null) {
+            server.stopServer();
+            server = null;
+        }
+        if (svrThread != null) {
+            svrThread.interrupt();
+            svrThread = null;
+        }
     }
 
     private void sendMsg(int code, String msg) {
