@@ -1,4 +1,4 @@
-# ConnHub
+# ConnHub v1.0.0
 
 Connection Hub
 
