@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Connection Hub 1.0</title>
+  <title>Connection Hub R4</title>
   <style>
     body {
       margin: 0;
@@ -68,11 +68,23 @@
       align-items: center;
     }
 
-    .file-item span {
+    .file-item .file-info {
       flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .file-item .file-name {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .file-item .file-size {
+      font-size: 0.75em;
+      color: #999;
     }
 
     .file-item button {
@@ -87,7 +99,53 @@
     .file-share .buttons {
       display: flex;
       align-items: center;
-      gap: 15px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .file-share .buttons .status-log {
+      flex: 1;
+      font-weight: bold;
+      margin-top: 0;
+    }
+
+    .btn-danger {
+      background: #dc3545 !important;
+    }
+
+    .btn-secondary {
+      background: #6c757d !important;
+    }
+
+    /* Upload progress bar */
+    .upload-progress-wrap {
+      margin-top: 8px;
+      display: none;
+    }
+
+    .upload-progress-wrap.visible {
+      display: block;
+    }
+
+    .upload-progress-bar-bg {
+      background: #e0e0e0;
+      border-radius: 4px;
+      height: 10px;
+      overflow: hidden;
+    }
+
+    .upload-progress-bar {
+      background: #007BFF;
+      height: 100%;
+      width: 0%;
+      transition: width 0.15s ease;
+      border-radius: 4px;
+    }
+
+    .upload-progress-label {
+      font-size: 0.78em;
+      color: #555;
+      margin-top: 3px;
     }
 
     /* Buttons */
@@ -99,6 +157,7 @@
       background: #007BFF;
       color: #fff;
       cursor: pointer;
+      white-space: nowrap;
     }
 
     button:hover {
@@ -124,23 +183,57 @@
     <div class="section file-share">
       <h2>File Share</h2>
       <div class="file-list" id="fileList"></div>
-      <div class="buttons">
+      <div class="upload-progress-wrap" id="uploadProgressWrap">
+        <div class="upload-progress-bar-bg">
+          <div class="upload-progress-bar" id="uploadProgressBar"></div>
+        </div>
+        <div class="upload-progress-label" id="uploadProgressLabel"></div>
+      </div>
+      <div class="buttons" style="margin-top: 10px;">
         <button onclick="uploadFile()">Upload</button>
-        <span class="status-log" id="fileLog" style="font-weight: bold; margin-top: 0;">Ready</span>
+        <button class="btn-secondary" onclick="downloadAll()">Download All</button>
+        <button class="btn-danger" onclick="deleteAll()">Delete All</button>
+        <span class="status-log" id="fileLog">Ready</span>
       </div>
     </div>
   </div>
 
   <script>
-    // tracker timestamp
+    // tracker timestamps
     let lastTextTs = 0;
     let lastFilesTs = 0;
+    let isUploading = false;
 
     let typingTimer;
     const textArea = document.getElementById('sharedText');
     const textLog = document.getElementById('textLog');
     const fileLog = document.getElementById('fileLog');
     const fileList = document.getElementById('fileList');
+    const uploadProgressWrap = document.getElementById('uploadProgressWrap');
+    const uploadProgressBar = document.getElementById('uploadProgressBar');
+    const uploadProgressLabel = document.getElementById('uploadProgressLabel');
+
+    // Encode UTF-8 filename to base64url
+    function encodeFilename(name) {
+      return btoa(unescape(encodeURIComponent(name)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    // Decode base64url to original filename
+    function decodeFilename(encoded) {
+      const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
+      return decodeURIComponent(escape(atob(b64 + pad)));
+    }
+
+    // Format file size for display
+    function formatSize(bytes) {
+      if (bytes === undefined || bytes === null) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MiB';
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GiB';
+    }
 
     // 1. Text autosave, wait 0.5s before sending to server
     textArea.addEventListener('input', () => {
@@ -156,7 +249,7 @@
           });
           if (response.ok) {
             const data = await response.json();
-            lastTextTs = data.ts; // update timestamp from server
+            lastTextTs = data.ts;
             textLog.textContent = 'Saved: ' + new Date().toLocaleTimeString();
           }
         } catch (e) {
@@ -168,20 +261,20 @@
     // 2. Status sync every 3 seconds
     async function syncState() {
       try {
-        // send client timestamp
+        // fetch state
         const response = await fetch(`/api/state?text_ts=${lastTextTs}&files_ts=${lastFilesTs}`);
         if (!response.ok) return;
         const state = await response.json();
 
-        // update DOM only if there is new text
+        // update text
         if (state.text && state.text.updated) {
           textArea.value = state.text.data;
           lastTextTs = state.text.ts;
           textLog.textContent = 'Synced: ' + new Date().toLocaleTimeString();
         }
 
-        // update DOM only if there is new files
-        if (state.files && state.files.updated) {
+        // skip overwrite if uploading
+        if (!isUploading && state.files && state.files.updated) {
           renderFiles(state.files.data);
           lastFilesTs = state.files.ts;
           fileLog.textContent = 'Synced: ' + new Date().toLocaleTimeString();
@@ -194,20 +287,29 @@
     // 3. Render file list
     function renderFiles(files) {
       fileList.innerHTML = '';
-      if (files.length === 0) {
+      if (!files || files.length === 0) {
         fileList.innerHTML = '<div style="color: #999; text-align: center;">No files uploaded</div>';
         return;
       }
-      files.forEach(filename => {
-        fileList.innerHTML += `
-          <div class="file-item">
-            <span>${filename}</span>
-            <div>
-              <button class="download-btn" onclick="downloadFile('${filename}')">Download</button>
-              <button onclick="deleteFile('${filename}')">Delete</button>
-            </div>
+
+      // files is array of {name: encodedName, size: bytes}
+      files.forEach(f => {
+        const encoded = f.name;
+        const displayName = decodeFilename(encoded);
+        const sizeStr = formatSize(f.size);
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        item.innerHTML = `
+          <div class="file-info">
+            <span class="file-name" title="${displayName}">${displayName}</span>
+            <span class="file-size">${sizeStr}</span>
+          </div>
+          <div>
+            <button class="download-btn" onclick="downloadFile('${encoded}')">Download</button>
+            <button onclick="deleteFile('${encoded}', '${displayName.replace(/'/g, "\\'")}')">Delete</button>
           </div>
         `;
+        fileList.appendChild(item);
       });
     }
 
@@ -218,39 +320,114 @@
       input.multiple = true;
 
       input.onchange = async () => {
-        const files = Array.from(input.files);
-        if (files.length === 0) return;
+        const selectedFiles = Array.from(input.files);
+        if (selectedFiles.length === 0) return;
 
-        for (const file of files) {
-          fileLog.textContent = 'Uploading: ' + file.name + '...';
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append("filename", file.name);
+        // show upload progress
+        isUploading = true;
+        uploadProgressWrap.classList.add('visible');
 
-          await fetch('/api/files/upload', {
-            method: 'POST',
-            body: formData
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const file = selectedFiles[i];
+          const encodedName = encodeFilename(file.name);
+
+          // show upload progress
+          fileLog.textContent = `Uploading ${i + 1}/${selectedFiles.length}: ${file.name}`;
+          uploadProgressBar.style.width = '0%';
+          uploadProgressLabel.textContent = `0% — ${file.name}`;
+
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/files/upload');
+
+            // show upload progress
+            xhr.upload.addEventListener('progress', (e) => {
+              if (e.lengthComputable) {
+                const pct = Math.round((e.loaded / e.total) * 100);
+                uploadProgressBar.style.width = pct + '%';
+                uploadProgressLabel.textContent = `${pct}% — ${file.name} (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
+              }
+            });
+
+            // file upload complete
+            xhr.addEventListener('load', () => {
+              uploadProgressBar.style.width = '100%';
+              resolve();
+            });
+            xhr.addEventListener('error', reject);
+
+            // file upload
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('filename', encodedName);
+            xhr.send(formData);
           });
         }
+
+        // hide upload progress
+        uploadProgressWrap.classList.remove('visible');
+        uploadProgressBar.style.width = '0%';
+        isUploading = false;
         fileLog.textContent = 'Upload complete';
-        syncState(); // trigger sync
+
+        // Force file sync
+        lastFilesTs = 0;
+        syncState();
       };
       input.click();
     }
 
     // 5. File download
-    function downloadFile(filename) {
-      window.location.href = `/api/files/download/${encodeURIComponent(filename)}`;
+    function downloadFile(encodedName) {
+      const displayName = decodeFilename(encodedName);
+      const a = document.createElement('a');
+      a.href = `/api/files/download/${encodedName}?name=${encodeURIComponent(displayName)}`; // use base64 to url, original to filename
+      a.download = displayName;
+      a.click();
     }
 
     // 6. File delete
-    async function deleteFile(filename) {
+    async function deleteFile(encodedName, displayName) {
+      if (!confirm(`Delete "${displayName}"?`)) return;
       fileLog.textContent = 'Deleting...';
-      await fetch(`/api/files/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-      syncState(); // trigger sync
+      await fetch(`/api/files/delete/${encodedName}`, { method: 'DELETE' });
+      lastFilesTs = 0;
+      syncState();
     }
 
-    // 7. Initial sync
+    // 7. Download all files by zip
+    function downloadAll() {
+      const items = fileList.querySelectorAll('.file-item');
+      if (items.length === 0) {
+        alert('No files to download.');
+        return;
+      }
+      if (!confirm(`Download all ${items.length} file(s) as files.zip?`)) return;
+
+      // download as files.zip
+      const a = document.createElement('a');
+      a.href = '/api/files/download-all';
+      a.download = 'files.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    // 8. Delete all files
+    async function deleteAll() {
+      const items = fileList.querySelectorAll('.file-item');
+      if (items.length === 0) {
+        alert('No files to delete.');
+        return;
+      }
+      if (!confirm(`Delete all ${items.length} file(s)?`)) return;
+      fileLog.textContent = 'Deleting all...';
+      await fetch('/api/files/delete-all', { method: 'DELETE' });
+      lastFilesTs = 0;
+      syncState();
+    }
+
+    // Initial sync, then sync every 3 seconds
     syncState();
     setInterval(syncState, 3000);
   </script>

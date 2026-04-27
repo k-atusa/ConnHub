@@ -2,16 +2,19 @@
 package main
 
 import (
-	"encoding/hex"
+	"archive/zip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,39 +26,58 @@ var tempDir string = "./temp"
 
 type Text struct {
 	data string
-	ts   int64 // last updated timestamp (ms)
+	ts   int64
 	lock sync.RWMutex
 }
 
+type FileEntry struct {
+	Name string `json:"name"` // base64url-encoded filename (from JS)
+	Size int64  `json:"size"` // file size in bytes
+}
+
 type Files struct {
-	data []string
-	ts   int64 // last updated timestamp (ms)
+	data []FileEntry
+	ts   int64
 	lock sync.RWMutex
 }
 
 func main() {
-	// get port number
-	port := 0
-	if len(os.Args) > 1 {
-		port, _ = strconv.Atoi(os.Args[1])
-	}
-	if port == 0 {
-		port = 8000 // default port
+	// parse args
+	port := 8000
+	delFiles := false
+	showIPv6 := false
+	for _, arg := range os.Args[1:] {
+		if arg == "-del" {
+			delFiles = true
+		} else if arg == "-ipv6" {
+			showIPv6 = true
+		} else if n, err := strconv.Atoi(arg); err == nil && n > 0 {
+			port = n
+		}
 	}
 
 	// check if port is already in use
-	chk, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	svcIP := fmt.Sprintf("0.0.0.0:%d", port)
+	chk, err := net.Listen("tcp", svcIP)
 	if err != nil {
-		log.Println("port in use")
+		log.Println(svcIP + " is already in use")
 		return
 	}
 	chk.Close()
 
-	// clear local files
-	os.RemoveAll(tempDir)
-	os.MkdirAll(tempDir, 0755)
-	defer os.RemoveAll(tempDir)
-	files.data = make([]string, 0)
+	// setup temp dir
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		os.MkdirAll(tempDir, 0755)
+	} else if delFiles {
+		os.RemoveAll(tempDir)
+		os.MkdirAll(tempDir, 0755)
+	}
+
+	// initialize global storage
+	files.data = make([]FileEntry, 0)
+	if !delFiles {
+		loadExistingFiles()
+	}
 	files.ts = time.Now().UnixMilli()
 	text.ts = time.Now().UnixMilli()
 
@@ -66,10 +88,12 @@ func main() {
 	http.HandleFunc("/api/text", handleText)
 	http.HandleFunc("/api/files/upload", handleFileUpload)
 	http.HandleFunc("/api/files/download/", handleFileDownload)
+	http.HandleFunc("/api/files/download-all", handleDownloadAll)
 	http.HandleFunc("/api/files/delete/", handleFileDelete)
+	http.HandleFunc("/api/files/delete-all", handleFileDeleteAll)
 	log.Println("server initialized")
 
-	// get local ip of server
+	// print local IPs
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		fmt.Println(err)
@@ -78,14 +102,40 @@ func main() {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
 				log.Printf("http://%s:%d", ipnet.IP.String(), port)
+			} else if showIPv6 {
+				log.Printf("http://[%s]:%d", ipnet.IP.String(), port)
 			}
 		}
 	}
 
-	// get connection
-	if err := http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", port), nil); err != nil {
+	// support both IPv4 and IPv6
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
 		log.Println(err)
 	}
+}
+
+// load existing files from temp dir
+func loadExistingFiles() {
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		log.Println("Failed to read temp dir: ", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files.data = append(files.data, FileEntry{
+			Name: entry.Name(),
+			Size: info.Size(),
+		})
+	}
+	log.Printf("loaded %d existing files\n", len(files.data))
 }
 
 // state sync check
@@ -99,7 +149,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	clientFilesTs, _ := strconv.ParseInt(q.Get("files_ts"), 10, 64)
 	resp := make(map[string]interface{})
 
-	// check text
+	// add text if updated
 	text.lock.RLock()
 	if text.ts > clientTextTs {
 		resp["text"] = map[string]interface{}{
@@ -112,7 +162,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	text.lock.RUnlock()
 
-	// check files
+	// add files if updated
 	files.lock.RLock()
 	if files.ts > clientFilesTs {
 		resp["files"] = map[string]interface{}{
@@ -136,12 +186,14 @@ func handleText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// read body text
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Error reading body", http.StatusBadRequest)
 		return
 	}
 
+	// update text
 	text.lock.Lock()
 	text.data = string(body)
 	text.ts = time.Now().UnixMilli()
@@ -152,7 +204,7 @@ func handleText(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]int64{"ts": currentTs})
 }
 
-// file upload
+// file upload, filename is encoded Base64 string
 func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -161,50 +213,48 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	files.lock.Lock()
 	defer files.lock.Unlock()
 
-	// get file format
-	r.ParseMultipartForm(10 << 30) // max size 10gb
-	file, header, err := r.FormFile("file")
+	r.ParseMultipartForm(128 * 1048576) // load 128MiB into memory
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Error reading file", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
-	baseName := filepath.Base(header.Filename)
-	encodedName := hex.EncodeToString([]byte(baseName))
-	savePath := filepath.Join(tempDir, encodedName)
 
-	// Remove existing file if it exists
+	// JS provides the base64url-encoded name
+	encodedName := strings.TrimSpace(r.FormValue("filename"))
+	if encodedName == "" {
+		http.Error(w, "Missing filename", http.StatusBadRequest)
+		return
+	}
+	savePath := filepath.Join(tempDir, encodedName) // Use encoded name directly as the disk filename
 	if _, err := os.Stat(savePath); err == nil {
-		if err := os.Remove(savePath); err != nil {
-			http.Error(w, "Error replacing existing file", http.StatusInternalServerError)
-			return
-		}
+		os.Remove(savePath)
 	}
 
-	// Save new file
+	// save file
 	dst, err := os.Create(savePath)
 	if err != nil {
 		http.Error(w, "Error saving file", http.StatusInternalServerError)
 		return
 	}
 	defer dst.Close()
-
-	// Copy file in chunks
-	buf := make([]byte, 1048576) // 1MB chunks
-	if _, err := io.CopyBuffer(dst, file, buf); err != nil {
+	buf := make([]byte, 1048576) // 1 MB chunks
+	written, err := io.CopyBuffer(dst, file, buf)
+	if err != nil {
 		http.Error(w, "Error saving file", http.StatusInternalServerError)
 		return
 	}
 
-	// Update file list
-	newFiles := make([]string, 0)
+	// update files
+	newList := make([]FileEntry, 0)
 	for _, f := range files.data {
-		if f != baseName {
-			newFiles = append(newFiles, f)
+		if f.Name != encodedName {
+			newList = append(newList, f)
 		}
 	}
-	files.data = append(newFiles, baseName) // Add new file
-	files.ts = time.Now().UnixMilli()       // Update timestamp
+	files.data = append(newList, FileEntry{Name: encodedName, Size: written})
+	files.ts = time.Now().UnixMilli()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -215,9 +265,8 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// get file name & path
-	filename := filepath.Base(r.URL.Path)
-	encodedName := hex.EncodeToString([]byte(filename))
+	// JS provides the base64url-encoded name
+	encodedName := filepath.Base(r.URL.Path)
 	filePath := filepath.Join(tempDir, encodedName)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -226,23 +275,77 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// set download mode
-	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+	// get real name
+	realName := r.URL.Query().Get("name")
+	if realName == "" {
+		realName = encodedName
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.QueryEscape(realName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 
-	// buffered sending
+	// send file
 	buf := make([]byte, 65536)
 	for {
 		n, err := file.Read(buf)
+		if n > 0 {
+			w.Write(buf[:n])
+			w.(http.Flusher).Flush()
+		}
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			http.Error(w, "Error reading file", http.StatusInternalServerError)
 			return
 		}
-		w.Write(buf[:n])
-		w.(http.Flusher).Flush()
+	}
+}
+
+// download all by zip
+func handleDownloadAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// check files
+	files.lock.RLock()
+	defer files.lock.RUnlock()
+	if len(files.data) == 0 {
+		http.Error(w, "No files to download", http.StatusNotFound)
+		return
+	}
+
+	// set header as zip
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="files.zip"`)
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	for _, f := range files.data {
+		// restore name from base64url
+		originalName := f.Name
+		decodedBytes, err := base64.RawURLEncoding.DecodeString(f.Name)
+		if err == nil {
+			originalName = string(decodedBytes)
+		}
+
+		// open file
+		diskPath := filepath.Join(tempDir, f.Name)
+		file, err := os.Open(diskPath)
+		if err != nil {
+			continue
+		}
+
+		// add file to zip
+		fw, err := zw.Create(originalName)
+		if err != nil {
+			file.Close()
+			continue
+		}
+
+		// copy file to zip stream
+		io.Copy(fw, file)
+		file.Close()
 	}
 }
 
@@ -255,18 +358,35 @@ func handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	files.lock.Lock()
 	defer files.lock.Unlock()
 
-	// Remove from file list
-	filename := filepath.Base(r.URL.Path)
-	newFiles := make([]string, 0)
+	// JS provides the base64url-encoded name
+	encodedName := filepath.Base(r.URL.Path)
+	newList := make([]FileEntry, 0)
 	for _, f := range files.data {
-		if f != filename {
-			newFiles = append(newFiles, f)
+		if f.Name != encodedName {
+			newList = append(newList, f)
 		}
 	}
-	files.data = newFiles
-	files.ts = time.Now().UnixMilli() // Update timestamp
+	files.data = newList
+	files.ts = time.Now().UnixMilli()
 
-	// Delete file
-	encodedName := hex.EncodeToString([]byte(filename))
 	os.Remove(filepath.Join(tempDir, encodedName))
+	w.WriteHeader(http.StatusOK)
+}
+
+// delete all files
+func handleFileDeleteAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "DELETE" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	files.lock.Lock()
+	defer files.lock.Unlock()
+
+	// remove files
+	for _, f := range files.data {
+		os.Remove(filepath.Join(tempDir, f.Name))
+	}
+	files.data = make([]FileEntry, 0)
+	files.ts = time.Now().UnixMilli()
+	w.WriteHeader(http.StatusOK)
 }
