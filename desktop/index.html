@@ -220,7 +220,7 @@
     return btoa(binString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   }
 
-  // Decode base64url to original filename (최신 TextDecoder 방식)
+  // Decode base64url to original filename
   function decodeFilename(encoded) {
     const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
     const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
