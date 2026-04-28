@@ -187,7 +187,7 @@ func handleText(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read body text
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10485760))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10485760)) // max memory 10MiB
 	if err != nil {
 		http.Error(w, "Error reading body", http.StatusBadRequest)
 		return
@@ -211,7 +211,7 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseMultipartForm(128 * 1048576) // load 128MiB into memory
+	r.ParseMultipartForm(128 * 1048576) // max memory 128MiB
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Error reading file", http.StatusBadRequest)
@@ -220,12 +220,12 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// JS provides the base64url-encoded name
-	encodedName := strings.TrimSpace(r.FormValue("filename"))
+	encodedName := filepath.Base(strings.TrimSpace(r.FormValue("filename"))) // prevent ../ access
 	if encodedName == "" {
 		http.Error(w, "Missing filename", http.StatusBadRequest)
 		return
 	}
-	savePath := filepath.Join(tempDir, filepath.Base(encodedName)) // Use encoded name directly as the disk filename
+	savePath := filepath.Join(tempDir, encodedName) // Use encoded name directly as the disk filename
 	if _, err := os.Stat(savePath); err == nil {
 		os.Remove(savePath)
 	}
@@ -266,7 +266,7 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// JS provides the base64url-encoded name
-	encodedName := filepath.Base(r.URL.Path)
+	encodedName := filepath.Base(r.URL.Path) // prevent ../ access
 	filePath := filepath.Join(tempDir, encodedName)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -280,7 +280,7 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if realName == "" {
 		realName = encodedName
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.QueryEscape(realName))
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.QueryEscape(realName)) // RFC 5987 utf-8
 	w.Header().Set("Content-Type", "application/octet-stream")
 
 	// send file
@@ -309,11 +309,13 @@ func handleDownloadAll(w http.ResponseWriter, r *http.Request) {
 
 	// check files
 	files.lock.RLock()
-	defer files.lock.RUnlock()
 	if len(files.data) == 0 {
 		http.Error(w, "No files to download", http.StatusNotFound)
 		return
 	}
+	filesCpy := make([]FileEntry, len(files.data))
+	copy(filesCpy, files.data)
+	files.lock.RUnlock()
 
 	// set header as zip
 	w.Header().Set("Content-Type", "application/zip")
@@ -321,12 +323,12 @@ func handleDownloadAll(w http.ResponseWriter, r *http.Request) {
 
 	zw := zip.NewWriter(w)
 	defer zw.Close()
-	for _, f := range files.data {
+	for _, f := range filesCpy {
 		// restore name from base64url
 		originalName := f.Name
 		decodedBytes, err := base64.RawURLEncoding.DecodeString(f.Name)
 		if err == nil {
-			originalName = filepath.Base(string(decodedBytes))
+			originalName = filepath.Base(string(decodedBytes)) // prevent ../ access
 		}
 
 		// open file
@@ -359,7 +361,7 @@ func handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	defer files.lock.Unlock()
 
 	// JS provides the base64url-encoded name
-	encodedName := filepath.Base(r.URL.Path)
+	encodedName := filepath.Base(r.URL.Path) // prevent ../ access
 	newList := make([]FileEntry, 0)
 	for _, f := range files.data {
 		if f.Name != encodedName {
