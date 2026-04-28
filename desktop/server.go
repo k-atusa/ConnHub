@@ -41,6 +41,43 @@ type Files struct {
 	lock sync.RWMutex
 }
 
+// get executable dir
+func GetPath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "./"
+	}
+	realPath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		realPath = exePath
+	}
+	return filepath.Dir(realPath)
+}
+
+// load existing files from temp dir
+func loadExistingFiles() {
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		log.Println("Failed to read temp dir: ", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files.data = append(files.data, FileEntry{
+			Name: entry.Name(),
+			Size: info.Size(),
+		})
+	}
+	log.Printf("loaded %d existing files\n", len(files.data))
+}
+
 func main() {
 	// parse args
 	port := 8000
@@ -55,6 +92,7 @@ func main() {
 			port = n
 		}
 	}
+	os.Chdir(GetPath()) // change to executable dir
 
 	// check if port is already in use
 	svcIP := fmt.Sprintf("0.0.0.0:%d", port)
@@ -112,30 +150,6 @@ func main() {
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
 		log.Println(err)
 	}
-}
-
-// load existing files from temp dir
-func loadExistingFiles() {
-	entries, err := os.ReadDir(tempDir)
-	if err != nil {
-		log.Println("Failed to read temp dir: ", err)
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files.data = append(files.data, FileEntry{
-			Name: entry.Name(),
-			Size: info.Size(),
-		})
-	}
-	log.Printf("loaded %d existing files\n", len(files.data))
 }
 
 // state sync check
