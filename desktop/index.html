@@ -213,31 +213,31 @@
     const uploadProgressBar = document.getElementById('uploadProgressBar');
     const uploadProgressLabel = document.getElementById('uploadProgressLabel');
 
-   // Encode UTF-8 filename to base64url
-  function encodeFilename(name) {
-    const bytes = new TextEncoder().encode(name);
-    const binString = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
-    return btoa(binString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  }
-
-  // Decode base64url to original filename
-  function decodeFilename(encoded) {
-    try{
-      const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-      const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
-      const binString = atob(b64 + pad);
-  
-      const bytes = new Uint8Array(binString.length);
-      for (let i = 0; i < binString.length; i++) {
-        bytes[i] = binString.charCodeAt(i);
-      }
-      return new TextDecoder().decode(bytes);
-      
-    } catch (e) {
-      console.warn("Invalid filename ", encoded, e);
-      return "unknown";
+    // Encode UTF-8 filename to base64url
+    function encodeFilename(name) {
+      const bytes = new TextEncoder().encode(name);
+      const binString = Array.from(bytes, byte => String.fromCharCode(byte)).join('');
+      return btoa(binString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     }
-  }
+
+    // Decode base64url to original filename
+    function decodeFilename(encoded) {
+      try{
+        const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
+        const binString = atob(b64 + pad);
+  
+        const bytes = new Uint8Array(binString.length);
+        for (let i = 0; i < binString.length; i++) {
+          bytes[i] = binString.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
+      
+      } catch (e) {
+        console.warn("Invalid filename ", encoded, e);
+        return "unknown";
+      }
+    }
 
     // Format file size for display
     function formatSize(bytes) {
