@@ -311,6 +311,7 @@ func handleDownloadAll(w http.ResponseWriter, r *http.Request) {
 	files.lock.RLock()
 	if len(files.data) == 0 {
 		http.Error(w, "No files to download", http.StatusNotFound)
+		files.lock.RUnlock()
 		return
 	}
 	filesCpy := make([]FileEntry, len(files.data))
