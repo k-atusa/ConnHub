@@ -20,7 +20,7 @@ def restore(directory):
             
             # Base64URL decode
             decoded_bytes = base64.urlsafe_b64decode(padded_filename)
-            original_name = decoded_bytes.decode('utf-8')
+            original_name = os.path.basename(decoded_bytes.decode('utf-8'))
             
             new_path = os.path.join(directory, original_name)
             os.rename(old_path, new_path)

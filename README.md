@@ -1,6 +1,6 @@
-# ConnHub v1.0.0
+# ConnHub
 
-Connection Hub
+Connection Hub R4
 
 > ConnHub is simple text/file sharing hub for local network.
 

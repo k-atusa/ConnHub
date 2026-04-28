@@ -187,7 +187,7 @@ func handleText(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read body text
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10485760))
 	if err != nil {
 		http.Error(w, "Error reading body", http.StatusBadRequest)
 		return
@@ -210,8 +210,6 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	files.lock.Lock()
-	defer files.lock.Unlock()
 
 	r.ParseMultipartForm(128 * 1048576) // load 128MiB into memory
 	file, _, err := r.FormFile("file")
@@ -227,7 +225,7 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing filename", http.StatusBadRequest)
 		return
 	}
-	savePath := filepath.Join(tempDir, encodedName) // Use encoded name directly as the disk filename
+	savePath := filepath.Join(tempDir, filepath.Base(encodedName)) // Use encoded name directly as the disk filename
 	if _, err := os.Stat(savePath); err == nil {
 		os.Remove(savePath)
 	}
@@ -247,6 +245,8 @@ func handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// update files
+	files.lock.Lock()
+	defer files.lock.Unlock()
 	newList := make([]FileEntry, 0)
 	for _, f := range files.data {
 		if f.Name != encodedName {
@@ -326,7 +326,7 @@ func handleDownloadAll(w http.ResponseWriter, r *http.Request) {
 		originalName := f.Name
 		decodedBytes, err := base64.RawURLEncoding.DecodeString(f.Name)
 		if err == nil {
-			originalName = string(decodedBytes)
+			originalName = filepath.Base(string(decodedBytes))
 		}
 
 		// open file

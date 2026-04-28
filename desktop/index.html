@@ -222,15 +222,21 @@
 
   // Decode base64url to original filename
   function decodeFilename(encoded) {
-    const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
-    const binString = atob(b64 + pad);
+    try{
+      const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = b64.length % 4 === 0 ? '' : '===='.slice(b64.length % 4);
+      const binString = atob(b64 + pad);
   
-    const bytes = new Uint8Array(binString.length);
-    for (let i = 0; i < binString.length; i++) {
-      bytes[i] = binString.charCodeAt(i);
+      const bytes = new Uint8Array(binString.length);
+      for (let i = 0; i < binString.length; i++) {
+        bytes[i] = binString.charCodeAt(i);
+      }
+      return new TextDecoder().decode(bytes);
+      
+    } catch (e) {
+      console.warn("Invalid filename ", encoded, e);
+      return "unknown";
     }
-    return new TextDecoder().decode(bytes);
   }
 
     // Format file size for display
@@ -302,7 +308,7 @@
       // files is array of {name: encodedName, size: bytes}
       files.forEach(f => {
         const encoded = f.name;
-        const displayName = decodeFilename(encoded);
+        const displayName = decodeFilename(encoded).replace(/[&<>"']/g, "_");
         const sizeStr = formatSize(f.size);
         const item = document.createElement('div');
         item.className = 'file-item';
