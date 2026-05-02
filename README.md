@@ -51,7 +51,7 @@ res/
 build.gradle.kts #file - project structure - dependency - add, version info
 ```
 
-- Sign Release build with jks keyfile
+- Align and Sign Release build with jks keyfile
 - There is two memory limit: Device limit and VM limit
     - Modern Android device RAM is 6~16 GB
     - But memory that one process can use is limited as VM memory, usually 256 MB
