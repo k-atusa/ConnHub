@@ -34,6 +34,29 @@
 
     <LinearLayout
         android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="8dp">
+
+        <CheckBox
+            android:id="@+id/check_del"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Delete Temp"
+            android:checked="false"
+            android:layout_marginRight="8dp"/>
+        <CheckBox
+            android:id="@+id/check_ipv6"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Enable IPv6"
+            android:checked="false"
+            android:layout_marginRight="8dp"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="horizontal"

@@ -3,15 +3,19 @@ plugins {
 }
 
 android {
-    namespace = "com.example.ku7_connhub"
-    compileSdk = 35
+    namespace = "com.example.k7connhub"
+    compileSdk {
+        version = release(36) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
-        applicationId = "com.example.ku7_connhub"
+        applicationId = "com.example.k7connhub"
         minSdk = 35
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -32,11 +36,10 @@ android {
 }
 
 dependencies {
-
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.nanohttpd)
     testImplementation(libs.junit)
-    androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+    androidTestImplementation(libs.ext.junit)
 }

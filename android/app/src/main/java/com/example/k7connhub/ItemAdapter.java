@@ -1,4 +1,4 @@
-package com.example.ku7_connhub;
+package com.example.k7connhub;
 
 import android.view.LayoutInflater;
 import android.view.View;
