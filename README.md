@@ -1,6 +1,6 @@
 # ConnHub
 
-Connection Hub R4
+Web Hub Yard - Connection Hub R4
 
 > ConnHub is simple text/file sharing hub for local network.
 
