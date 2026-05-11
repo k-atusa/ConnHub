@@ -1,6 +1,6 @@
-# ConnHub
+# ConnHub v1.4.1
 
-Web Hub Yard - Connection Hub R4
+project WHY(Web Hub Yard): Connection Hub
 
 > ConnHub is simple text/file sharing hub for local network.
 
