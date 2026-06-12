@@ -35,6 +35,7 @@
 </manifest>
 
 <!--
+test818: connhub_android
 resource:
     res - new - image asset - add foreground, background image
     app - new - folder - asset folder - copy & paste index.html, favicon.ico
