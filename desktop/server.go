@@ -294,7 +294,7 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if realName == "" {
 		realName = encodedName
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.QueryEscape(realName)) // RFC 5987 utf-8
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+strings.ReplaceAll(url.QueryEscape(realName), "+", "%20")) // RFC 5987 utf-8
 	w.Header().Set("Content-Type", "application/octet-stream")
 
 	// send file
